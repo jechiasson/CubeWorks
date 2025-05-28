@@ -1,8 +1,11 @@
 # This is the main file, to be run on startup of the Pi
 import sys
 sys.path.append('../')
+import os # For path manipulation and creating directories
 import os.path
 import json # Added for telemetry config
+import time # For fallback timestamp
+import math # For math.nan
 from flightLogic import getDriverData
 import flightLogic.saveTofiles as saveTofiles
 from Drivers.antennaDoor.AntennaDoor import AntennaDoor as antennaDoor
@@ -23,6 +26,7 @@ from Drivers.eps import EPS as EPS
 
 # Telemetry Imports
 from flightLogic.telemetryManager import TelemetryManager
+from .telemetry_writer import serialize_telemetry # Import for writing binary telemetry
 from Drivers.Accelerometer.Accelerometer import Accelerometer
 from Drivers.Magnetometer.Magnetometer import Magnetometer
 from Drivers.UV.UVDriver import UVDriver
@@ -42,16 +46,106 @@ from Drivers.transceiverConfig.TransceiverConfig import TransceiverConfig
 # from TXISR import interrupt
 # NOTE: This Code has past unit testing
 
-async def collect_and_log_telemetry(telemetry_manager, collection_interval_seconds):
+async def collect_and_log_telemetry(telemetry_manager, collection_interval_seconds, output_file_path):
     """
-    Collects and prints telemetry data from the TelemetryManager periodically.
+    Collects telemetry data, transforms it for serialization, and writes it to a binary file.
     """
+    # Attempt to get a persistent RTC instance if available, otherwise use time.time()
+    rtc_driver_instance = None
+    if hasattr(telemetry_manager, 'drivers'): # Check if drivers list exists
+        for driver in telemetry_manager.drivers:
+            if driver.name == 'rtc': # Assuming RTC driver is named 'rtc'
+                rtc_driver_instance = driver
+                break
+
     while True:
+        flat_telemetry_payload = {}
         try:
-            telemetry_data = telemetry_manager.collect_telemetry()
-            print(f"Telemetry @ {RTC().readSeconds()}: {telemetry_data}") # Using RTC().readSeconds() for timestamp
+            telemetry_data_raw = telemetry_manager.collect_telemetry()
+            # print(f"Raw Telemetry Collected: {telemetry_data_raw}") # For debugging
+
+            # 1. RTC_TIMESTAMP
+            if rtc_driver_instance:
+                try:
+                    flat_telemetry_payload['RTC_TIMESTAMP'] = rtc_driver_instance.read() # Assumes read() gives timestamp
+                except Exception as e:
+                    print(f"Error reading from RTC driver: {e}")
+                    flat_telemetry_payload['RTC_TIMESTAMP'] = time.time()
+            elif 'rtc' in telemetry_data_raw and 'value' in telemetry_data_raw['rtc']: # Fallback to raw data if RTC obj not found
+                 flat_telemetry_payload['RTC_TIMESTAMP'] = telemetry_data_raw['rtc']['value']
+            else:
+                flat_telemetry_payload['RTC_TIMESTAMP'] = time.time()
+
+            # 2. Accelerometer Data (ACCEL_X, ACCEL_Y, ACCEL_Z)
+            accel_data = telemetry_data_raw.get('Accelerometer', {}).get('value', (math.nan, math.nan, math.nan))
+            if isinstance(accel_data, (list, tuple)) and len(accel_data) == 3:
+                flat_telemetry_payload['ACCEL_X'] = accel_data[0]
+                flat_telemetry_payload['ACCEL_Y'] = accel_data[1]
+                flat_telemetry_payload['ACCEL_Z'] = accel_data[2]
+            else:
+                flat_telemetry_payload['ACCEL_X'] = flat_telemetry_payload['ACCEL_Y'] = flat_telemetry_payload['ACCEL_Z'] = math.nan
+
+            # 3. Magnetometer Data (MAG_X, MAG_Y, MAG_Z)
+            mag_data = telemetry_data_raw.get('Magnetometer', {}).get('value', (math.nan, math.nan, math.nan))
+            if isinstance(mag_data, (list, tuple)) and len(mag_data) == 3:
+                flat_telemetry_payload['MAG_X'] = mag_data[0]
+                flat_telemetry_payload['MAG_Y'] = mag_data[1]
+                flat_telemetry_payload['MAG_Z'] = mag_data[2]
+            else:
+                flat_telemetry_payload['MAG_X'] = flat_telemetry_payload['MAG_Y'] = flat_telemetry_payload['MAG_Z'] = math.nan
+            
+            # 4. Gyroscope Data (GYRO_X, GYRO_Y, GYRO_Z) - Assuming no separate gyro driver, defaults to NaN via EXPECTED_SENSORS
+            # If a Gyro driver existed, it would be handled like Accelerometer.
+            # These will be filled with DEFAULT_SENSOR_VALUE (NaN) by serialize_telemetry if not present.
+            flat_telemetry_payload['GYRO_X'] = telemetry_data_raw.get('Gyroscope', {}).get('value', (math.nan, math.nan, math.nan))[0] if 'Gyroscope' in telemetry_data_raw else math.nan # Example
+            flat_telemetry_payload['GYRO_Y'] = telemetry_data_raw.get('Gyroscope', {}).get('value', (math.nan, math.nan, math.nan))[1] if 'Gyroscope' in telemetry_data_raw else math.nan
+            flat_telemetry_payload['GYRO_Z'] = telemetry_data_raw.get('Gyroscope', {}).get('value', (math.nan, math.nan, math.nan))[2] if 'Gyroscope' in telemetry_data_raw else math.nan
+
+
+            # 5. CPU Temperature (CPU_TEMP_C)
+            flat_telemetry_payload['CPU_TEMP_C'] = telemetry_data_raw.get('CpuTemperature', {}).get('value', math.nan)
+
+            # 6. UV Index (UV_INDEX)
+            flat_telemetry_payload['UV_INDEX'] = telemetry_data_raw.get('UVDriver', {}).get('value', math.nan)
+            
+            # 7. EPS Data (already flat, merge directly)
+            # The EPS driver's get_telemetry_data() returns a dictionary like:
+            # {'driver_name': 'EPS', 'mcu_temp_c': ..., 'bus_voltage_v': ... }
+            # We need to extract these specific keys for EXPECTED_SENSORS in telemetry_writer.py
+            eps_data = telemetry_data_raw.get('EPS', {})
+            if eps_data: # If EPS data exists
+                # Map EPS keys to the keys defined in EXPECTED_SENSORS
+                flat_telemetry_payload['EPS_MCU_TEMP_C'] = eps_data.get('mcu_temp_c', math.nan)
+                flat_telemetry_payload['EPS_CELL1_TEMP_C'] = eps_data.get('cell1_temp_c', math.nan)
+                flat_telemetry_payload['EPS_CELL2_TEMP_C'] = eps_data.get('cell2_temp_c', math.nan)
+                flat_telemetry_payload['EPS_BUS_VOLTAGE_V'] = eps_data.get('bus_voltage_v', math.nan)
+                flat_telemetry_payload['EPS_BUS_CURRENT_A'] = eps_data.get('bus_current_a', math.nan)
+                flat_telemetry_payload['EPS_BCR_VOLTAGE_V'] = eps_data.get('bcr_voltage_v', math.nan)
+                flat_telemetry_payload['EPS_BCR_CURRENT_A'] = eps_data.get('bcr_current_a', math.nan)
+                flat_telemetry_payload['EPS_3V3_CURRENT_A'] = eps_data.get('3v3_current_a', math.nan)
+                flat_telemetry_payload['EPS_5V_CURRENT_A'] = eps_data.get('5v_current_a', math.nan)
+                flat_telemetry_payload['EPS_SPX_VOLTAGE_V'] = eps_data.get('spx_voltage_v', math.nan)
+                flat_telemetry_payload['EPS_SPX_MINUS_CURRENT_A'] = eps_data.get('spx_minus_current_a', math.nan)
+                flat_telemetry_payload['EPS_SPX_PLUS_CURRENT_A'] = eps_data.get('spx_plus_current_a', math.nan)
+                flat_telemetry_payload['EPS_SPY_VOLTAGE_V'] = eps_data.get('spy_voltage_v', math.nan)
+                flat_telemetry_payload['EPS_SPY_MINUS_CURRENT_A'] = eps_data.get('spy_minus_current_a', math.nan)
+                flat_telemetry_payload['EPS_SPY_PLUS_CURRENT_A'] = eps_data.get('spy_plus_current_a', math.nan)
+                flat_telemetry_payload['EPS_SPZ_VOLTAGE_V'] = eps_data.get('spz_voltage_v', math.nan)
+                flat_telemetry_payload['EPS_SPZ_PLUS_CURRENT_A'] = eps_data.get('spz_plus_current_a', math.nan)
+            
+            # For any other sensors in EXPECTED_SENSORS not explicitly handled,
+            # serialize_telemetry will use DEFAULT_SENSOR_VALUE (NaN)
+            # print(f"Flattened Payload for Serialization: {flat_telemetry_payload}") # For debugging
+
+            success = serialize_telemetry(flat_telemetry_payload, output_file_path)
+            if success:
+                print(f"Telemetry successfully serialized to {output_file_path} at {flat_telemetry_payload['RTC_TIMESTAMP']}")
+            else:
+                print(f"Failed to serialize telemetry to {output_file_path}")
+
         except Exception as e:
-            print(f"Error collecting or logging telemetry: {e}")
+            print(f"Error in collect_and_log_telemetry loop: {e}")
+        
         await asyncio.sleep(collection_interval_seconds)
 
 ##################################################################################################################
@@ -89,6 +183,13 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	# We will use `antennaDoorDriver` for the telemetry version.
 	# antennaDoorObj = antennaDoor() # This line is kept for existing logic if needed by mission modes directly
 	
+	# Define Telemetry Output File Path and ensure directory exists
+	# Using /home/pi/flightLogicData/ as a base, similar to other data files in the script
+	TELEMETRY_OUTPUT_DIR = "/home/pi/flightLogicData/telemetry_data"
+	os.makedirs(TELEMETRY_OUTPUT_DIR, exist_ok=True)
+	TELEMETRY_OUTPUT_FILE = os.path.join(TELEMETRY_OUTPUT_DIR, "flight_data.bin")
+	print(f"Telemetry data will be written to: {TELEMETRY_OUTPUT_FILE}")
+
 	# Load Telemetry Configuration
 	config_file_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'telemetry_config.json')
 	try:
@@ -158,8 +259,8 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	tasks.append(asyncio.create_task(pythonInterrupt.interrupt(transmitObject, packet)))  # starting rx monitoring 
 	tasks.append(asyncio.create_task(ttncData.collectTTNCData(0)))  # Boot Mode is classified as 0
 	tasks.append(asyncio.create_task(attitudeData.collectAttitudeData()))  # collecting attitude data
-	# Use telemetry_interval from config
-	tasks.append(asyncio.create_task(collect_and_log_telemetry(telemetry_mgr, telemetry_interval)))
+	# Use telemetry_interval from config and pass the output file path
+	tasks.append(asyncio.create_task(collect_and_log_telemetry(telemetry_mgr, telemetry_interval, TELEMETRY_OUTPUT_FILE)))
 
 	# Initialize all mission mode objects
 	# NOTE: the comms-tx is the only exception to this rule as it is to be handled differently than other mission modes

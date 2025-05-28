@@ -1,0 +1,17 @@
+TARGET FLIGHT_SYSTEM_TARGET FLIGHT_SYSTEM_TARGET
+
+INTERFACE FLIGHT_DATA_INT openc3/interfaces/file_interface.py nil /cosmos_tlm_input /cosmos_tlm_archive 65536 true
+  MAP_TLM_TARGET FLIGHT_SYSTEM_TARGET
+  # Protocol: LengthProtocol
+  # Parameters for LengthProtocol:
+  #   Read Direction: READ
+  #   Length Bit Offset: 0 (since length is at the very start of our record)
+  #   Length Bit Size: 32 (4 bytes for our unsigned int length)
+  #   Length Value Offset: 0 (the length itself is the full packet/record length, not including the length field itself)
+  #   Bytes per Count: 1
+  #   Length Endianness: BIG_ENDIAN
+  #   Discard Leading Bytes: 0
+  #   Sync Pattern: nil (none)
+  #   Max Length: nil (none, or a reasonable value like 1MB if desired: 1048576 bytes)
+  #   Fill Length and Sync Pattern: false (not applicable for read)
+  PROTOCOL READ LengthProtocol 0 32 0 1 BIG_ENDIAN 0 nil nil false

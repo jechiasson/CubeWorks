@@ -1,0 +1,71 @@
+TELEMETRY FLIGHT_SYSTEM_TARGET FLIGHT_PACKET BIG_ENDIAN "Flight Telemetry Packet"
+  ID_ITEM PKT_ID 0 16 UINT 4660 "Packet Identifier"
+
+  ITEM RTC_TIMESTAMP 16 64 FLOAT "Timestamp (Unix seconds)"
+    FORMAT_STRING "%.3f"
+
+  # Sensor Data (all floats, 4 bytes = 32 bits each)
+  # Offsets are relative to the start of the packet (after PKT_ID)
+  # PKT_ID is 0-15 bits. RTC_TIMESTAMP is 16-79 bits.
+  # First sensor data item starts at bit 80.
+
+  ITEM ACCEL_X     80  32 FLOAT "Accelerometer X"
+    UNITS m/s^2
+  ITEM ACCEL_Y     112 32 FLOAT "Accelerometer Y"
+    UNITS m/s^2
+  ITEM ACCEL_Z     144 32 FLOAT "Accelerometer Z"
+    UNITS m/s^2
+
+  ITEM MAG_X       176 32 FLOAT "Magnetometer X"
+    UNITS uT
+  ITEM MAG_Y       208 32 FLOAT "Magnetometer Y"
+    UNITS uT
+  ITEM MAG_Z       240 32 FLOAT "Magnetometer Z"
+    UNITS uT
+
+  ITEM GYRO_X      272 32 FLOAT "Gyroscope X"
+    UNITS rad/s
+  ITEM GYRO_Y      304 32 FLOAT "Gyroscope Y"
+    UNITS rad/s
+  ITEM GYRO_Z      336 32 FLOAT "Gyroscope Z"
+    UNITS rad/s
+
+  ITEM CPU_TEMP_C  368 32 FLOAT "CPU Temperature"
+    UNITS Celsius
+
+  ITEM UV_INDEX    400 32 FLOAT "UV Index"
+
+  ITEM EPS_MCU_TEMP_C            432 32 FLOAT "EPS MCU Temperature"
+    UNITS Celsius
+  ITEM EPS_CELL1_TEMP_C          464 32 FLOAT "EPS Cell 1 Temperature"
+    UNITS Celsius
+  ITEM EPS_CELL2_TEMP_C          496 32 FLOAT "EPS Cell 2 Temperature"
+    UNITS Celsius
+  ITEM EPS_BUS_VOLTAGE_V         528 32 FLOAT "EPS Bus Voltage"
+    UNITS Volts
+  ITEM EPS_BUS_CURRENT_A         560 32 FLOAT "EPS Bus Current"
+    UNITS Amps
+  ITEM EPS_BCR_VOLTAGE_V         592 32 FLOAT "EPS BCR Voltage"
+    UNITS Volts
+  ITEM EPS_BCR_CURRENT_A         624 32 FLOAT "EPS BCR Current"
+    UNITS Amps
+  ITEM EPS_3V3_CURRENT_A         656 32 FLOAT "EPS 3.3V Current"
+    UNITS Amps
+  ITEM EPS_5V_CURRENT_A          688 32 FLOAT "EPS 5V Current"
+    UNITS Amps
+  ITEM EPS_SPX_VOLTAGE_V         720 32 FLOAT "EPS SPX Voltage"
+    UNITS Volts
+  ITEM EPS_SPX_MINUS_CURRENT_A   752 32 FLOAT "EPS SPX Minus Current"
+    UNITS Amps
+  ITEM EPS_SPX_PLUS_CURRENT_A    784 32 FLOAT "EPS SPX Plus Current"
+    UNITS Amps
+  ITEM EPS_SPY_VOLTAGE_V         816 32 FLOAT "EPS SPY Voltage"
+    UNITS Volts
+  ITEM EPS_SPY_MINUS_CURRENT_A   848 32 FLOAT "EPS SPY Minus Current"
+    UNITS Amps
+  ITEM EPS_SPY_PLUS_CURRENT_A    880 32 FLOAT "EPS SPY Plus Current"
+    UNITS Amps
+  ITEM EPS_SPZ_VOLTAGE_V         912 32 FLOAT "EPS SPZ Voltage"
+    UNITS Volts
+  ITEM EPS_SPZ_PLUS_CURRENT_A    944 32 FLOAT "EPS SPZ Plus Current"
+    UNITS Amps
