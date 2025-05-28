@@ -2,6 +2,7 @@
 import sys
 sys.path.append('../')
 import os.path
+import json # Added for telemetry config
 from flightLogic import getDriverData
 import flightLogic.saveTofiles as saveTofiles
 from Drivers.antennaDoor.AntennaDoor import AntennaDoor as antennaDoor
@@ -20,11 +21,38 @@ from TXISR.packetProcessing import packetProcessing
 from Drivers.camera import Camera
 from Drivers.eps import EPS as EPS
 
-
+# Telemetry Imports
+from flightLogic.telemetryManager import TelemetryManager
+from Drivers.Accelerometer.Accelerometer import Accelerometer
+from Drivers.Magnetometer.Magnetometer import Magnetometer
+from Drivers.UV.UVDriver import UVDriver
+from Drivers.adc.ADC_Driver import ADC
+from Drivers.antennaDoor.AntennaDoor import AntennaDoor as antennaDoorDriver # Alias to avoid conflict
+from Drivers.backupAntennaDeployer.BackupAntennaDeployer import BackupAntennaDeployer
+from Drivers.boomDeployer.BoomDeployer import BoomDeployer
+from Drivers.camera.Camera import Camera as CameraDriver # Alias to avoid conflict
+from Drivers.cpuTemperature.CpuTemperature import CpuTemperature
+from Drivers.eps.EPS import EPS as EPSDriver # Alias to avoid conflict
+from Drivers.rtc.rtc_driver import RTC
+from Drivers.solarPanelTemp.solarDriver import TempSensor
+from Drivers.sunSensors.sunSensorDriver import sunSensor
+from Drivers.transceiverConfig.TransceiverConfig import TransceiverConfig
 
 
 # from TXISR import interrupt
 # NOTE: This Code has past unit testing
+
+async def collect_and_log_telemetry(telemetry_manager, collection_interval_seconds):
+    """
+    Collects and prints telemetry data from the TelemetryManager periodically.
+    """
+    while True:
+        try:
+            telemetry_data = telemetry_manager.collect_telemetry()
+            print(f"Telemetry @ {RTC().readSeconds()}: {telemetry_data}") # Using RTC().readSeconds() for timestamp
+        except Exception as e:
+            print(f"Error collecting or logging telemetry: {e}")
+        await asyncio.sleep(collection_interval_seconds)
 
 ##################################################################################################################
 # executeFlightLogic()
@@ -46,7 +74,8 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	cameraObj = Camera()
 	# Variable setup
 	delay = 35*60  # 35 minute delay #TODO: set this delay to 35 min
-	antennaVoltageCheckWait = 22*60*60 # 22 hour wait for the voltage to increase past the threshold. This is arbitrary for now
+	# antennaVoltageCheckWait = 22*60*60 # 22 hour wait for the voltage to increase past the threshold. This is arbitrary for now
+	# Commented out as it's not used in the current scope of changes. Will be re-evaluated if logic demands.
 	boot = True
 	saveObject = saveTofiles.save()
 	# startTXISR(save)
@@ -56,14 +85,81 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	transmitObject = Transmitting(codeBase, cameraObj)
 	packet = packetProcessing(transmitObject, cameraObj)
 	heartBeatObj = heart_beat()
-	antennaDoorObj = antennaDoor()
+	# NOTE: antennaDoorObj is already instantiated in this file.
+	# We will use `antennaDoorDriver` for the telemetry version.
+	# antennaDoorObj = antennaDoor() # This line is kept for existing logic if needed by mission modes directly
 	
-	print('Starting data collection') #Setting up Background tasks for BOOT mode
+	# Load Telemetry Configuration
+	config_file_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'telemetry_config.json')
+	try:
+		with open(config_file_path, 'r') as f:
+			telemetry_config = json.load(f)
+		print(f"Telemetry config loaded from {config_file_path}")
+	except FileNotFoundError:
+		print(f"Telemetry config file {config_file_path} not found. Using default values.")
+		telemetry_config = {"telemetry_interval_seconds": 60, "enabled_sensors": ["Accelerometer", "Magnetometer", "EPS", "CpuTemperature"]} # Default to a basic set
+	except json.JSONDecodeError:
+		print(f"Error decoding telemetry config file {config_file_path}. Using default values.")
+		telemetry_config = {"telemetry_interval_seconds": 60, "enabled_sensors": ["Accelerometer", "Magnetometer", "EPS", "CpuTemperature"]}
+
+	telemetry_interval = telemetry_config.get("telemetry_interval_seconds", 60)
+	enabled_sensors_from_config = telemetry_config.get("enabled_sensors", [])
+	print(f"Telemetry interval: {telemetry_interval}s. Enabled sensors from config: {enabled_sensors_from_config}")
+
+	# Initialize TelemetryManager with the list of enabled sensor names from the config
+	telemetry_mgr = TelemetryManager(enabled_sensors_list=enabled_sensors_from_config)
+
+	# Map configuration names to driver classes and their expected 'name' attribute for TelemetryManager
+	# The 'name' attribute is what TelemetryManager uses to filter.
+	# This map helps instantiate only necessary drivers and ensures their 'name' attribute matches config.
+	# Note: BackupAntennaDeployer and TransceiverConfig are not in the typical config list, added here for completeness if they were.
+	driver_config_map = {
+		"Accelerometer": (Accelerometer, "Accelerometer"),
+		"Magnetometer": (Magnetometer, "Magnetometer"),
+		"EPS": (EPSDriver, "EPS"),
+		"CpuTemperature": (CpuTemperature, "CpuTemperature"),
+		"UVDriver": (UVDriver, "UVDriver"),
+		"ADC_Driver": (ADC, "ADC"), # Config name is "ADC_Driver", class is ADC, driver.name is "ADC"
+		"rtc_driver": (RTC, "rtc"), # Config name is "rtc_driver", class is RTC, driver.name is "rtc"
+		"solarDriver": (TempSensor, "SolarPanelTemp"), # Config name is "solarDriver", class is TempSensor, driver.name "SolarPanelTemp"
+		"sunSensorDriver": (sunSensor, "Sun Sensor"), # Config name is "sunSensorDriver", class is sunSensor, driver.name "Sun Sensor"
+		"BoomDeployer": (BoomDeployer, "BoomDeployer"),
+		"Camera": (CameraDriver, "Camera"),
+		"AntennaDoor": (antennaDoorDriver, "AntennaDoor"),
+		"BackupAntennaDeployer": (BackupAntennaDeployer, "BackupAntennaDeployer"), # Not in example config, but if it were
+		"TransceiverConfig": (TransceiverConfig, "TransceiverConfig") # Not in example config, but if it were
+	}
+
+	for config_name, (driver_class, expected_driver_name_attr) in driver_config_map.items():
+		if config_name in enabled_sensors_from_config:
+			try:
+				driver_instance = driver_class()
+				# Critical: Ensure the instance's 'name' attribute matches what TelemetryManager expects
+				# This is usually set in the driver's super().__init__("ExpectedName")
+				if hasattr(driver_instance, 'name') and driver_instance.name == expected_driver_name_attr:
+					telemetry_mgr.register_driver(driver_instance) # register_driver now handles the filtering
+					# print(f"Driver '{config_name}' initialized and passed to TelemetryManager.") # Redundant with TM prints
+				elif hasattr(driver_instance, 'name'):
+					print(f"Driver '{config_name}' instantiated, but its internal name '{driver_instance.name}' does not match expected '{expected_driver_name_attr}'. Not registered by TelemetryManager if names differ.")
+					# Still register it, TelemetryManager will make the final decision.
+					telemetry_mgr.register_driver(driver_instance)
+				else:
+					# This case should have been caught by TelemetryManager's hasattr check,
+					# but good to be aware of if TM's logic changes.
+					print(f"Driver '{config_name}' instantiated but has no 'name' attribute. Cannot be registered by TelemetryManager filtering.")
+			except Exception as e:
+				print(f"Failed to instantiate driver for '{config_name}': {e}")
+		else:
+			print(f"Driver '{config_name}' not in enabled_sensors_from_config, skipping instantiation.")
+	
+	print('Starting data collection and telemetry') #Setting up Background tasks for BOOT mode
 	tasks=[]
 	tasks.append(asyncio.create_task(heartBeatObj.heartBeatRun()))  # starting heart beat
 	tasks.append(asyncio.create_task(pythonInterrupt.interrupt(transmitObject, packet)))  # starting rx monitoring 
 	tasks.append(asyncio.create_task(ttncData.collectTTNCData(0)))  # Boot Mode is classified as 0
 	tasks.append(asyncio.create_task(attitudeData.collectAttitudeData()))  # collecting attitude data
+	# Use telemetry_interval from config
+	tasks.append(asyncio.create_task(collect_and_log_telemetry(telemetry_mgr, telemetry_interval)))
 
 	# Initialize all mission mode objects
 	# NOTE: the comms-tx is the only exception to this rule as it is to be handled differently than other mission modes
@@ -125,12 +221,14 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	except :
 		print("____Failed to deploy the antenna_____")
 	# status is set True if all 4 doors are deployed, else it is False
+	# This part of the logic uses the original antennaDoorObj
+	original_antenna_door_obj = antennaDoor() # Ensuring we use the original object for this logic
 	try:
-		status = antennaDoorObj.readDoorStatus()
+		status = original_antenna_door_obj.readDoorStatus()
 	except:
 		status = False
-		print("Failed to check antenna door status")
-	if antennaDeployed == True:
+		print("Failed to check antenna door status using original_antenna_door_obj")
+	if antennaDeployed == True: # antennaDeployed is a variable tracking state
 		pass
 	elif status == True:
 		antennaDeployed = True
@@ -139,15 +237,27 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 
 	recordData(bootCount, antennaDeployed, lastMode)
 
+	# NOTE: Boot mode tasks are cancelled before moving to the next mode.
+	# The telemetry task should persist across modes.
+	# However, the current structure cancels all tasks in `tasks` list.
+	# This means telemetry collection will also stop when transitioning from BOOT.
+	# This might need further refinement if telemetry is expected to be continuous
+	# across all mission modes without restarting. For now, following existing pattern.
 	
-	try:  # Cancels attitude collection tasks
+	try:  # Cancels attitude collection tasks (and telemetry as it's in the same list)
 		for t in tasks:
 			t.cancel()
-		print('Successfully cancelled BOOT mode background tasks')
+		print('Successfully cancelled BOOT mode background tasks (including telemetry for now)')
 	except asyncio.exceptions.CancelledError:
 		print("Exception thrown cancelling task - This is normal")
 		
 	if not antennaDeployed:
+		# Re-add telemetry task if it's meant to run in this new mode
+		# For now, assuming telemetry task is part of the "main" lifecycle managed by executeFlightLogic,
+		# and if it's cancelled, it's for a reason (e.g. mode transition that shouldn't have it).
+		# If telemetry should be *always* on, its management needs to be outside this specific task list.
+		# Given the current structure, if tasks are cancelled, telemetry is cancelled.
+		# Let's proceed with this understanding. A new telemetry task would be started if executeFlightLogic was re-entered.
 		await asyncio.gather(antennaDeploy.run())
 		print('Running Antenna Deployment Mode')
 		antennaDeployed = True

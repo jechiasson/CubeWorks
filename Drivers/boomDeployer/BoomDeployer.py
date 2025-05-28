@@ -11,7 +11,7 @@ class BoomDeployer(Driver):
 		Calls parent constructor, Defines initial burn time, time to wait in between burns,
 		and how many times to burn before giving up.  Sets up the GPIO pin for use by the actuate method.
 		"""
-		#super().__init__("BoomDeployer")
+		super().__init__("BoomDeployer")
 		# Initial values
 		self.burnTimeWC1 = 10
 		self.burnTimeWC2 = 10

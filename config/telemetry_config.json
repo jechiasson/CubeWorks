@@ -1,0 +1,17 @@
+{
+  "telemetry_interval_seconds": 60,
+  "enabled_sensors": [
+    "Accelerometer",
+    "Magnetometer",
+    "EPS",
+    "CpuTemperature",
+    "UVDriver",
+    "ADC_Driver",
+    "rtc_driver",
+    "solarDriver",
+    "sunSensorDriver",
+    "BoomDeployer",
+    "Camera",
+    "AntennaDoor"
+  ]
+}

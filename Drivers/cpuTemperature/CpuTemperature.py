@@ -3,7 +3,7 @@ from os import popen
 
 class CpuTemperature(Driver):
 	def __init__(self):
-		super().__init__(CpuTemperature)
+		super().__init__("CpuTemperature")
 
 	def read(self):
 		temp = popen("vcgencmd measure_temp").readline()

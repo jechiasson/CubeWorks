@@ -38,3 +38,25 @@ class Driver:
             async with lock:
                 context[self.name] = reading
             await asyncio.sleep(self.delay)
+
+    def get_telemetry_data(self):
+        """
+        Reads data from the driver and formats it for telemetry.
+        Returns:
+            dict: A dictionary containing the driver's name and its read value.
+                  Returns {'driver_name': self.name, 'value': None} if read() fails or returns None.
+        """
+        value = None
+        try:
+            value = self.read()
+        except Exception as e:
+            # Optionally log the error e
+            # print(f"Error reading from driver {self.name}: {e}")
+            pass  # Value remains None
+
+        try:
+            # self.name should always exist due to __init__
+            return {'driver_name': self.name, 'value': value}
+        except AttributeError:
+            # Fallback if self.name is somehow not set, though unlikely.
+            return {'driver_name': 'UnknownDriver', 'value': value}

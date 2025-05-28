@@ -36,7 +36,36 @@ class EPS(Driver):
 
     def read(self):
         #returns nothing since there are so many different things we could read, use other methods instead
+        # Consider if a summary or key status could be returned here for basic telemetry.
         pass
+
+    def get_telemetry_data(self):
+        """
+        Collects all telemetry data points from the EPS.
+        """
+        return {
+            'driver_name': self.name,
+            'mcu_temp_c': self.getMCUTemp(),
+            'cell1_temp_c': self.getCell1Temp(),
+            'cell2_temp_c': self.getCell2Temp(),
+            'bus_voltage_v': self.getBusVoltage(),
+            'bus_current_a': self.getBusCurrent(),
+            'bcr_voltage_v': self.getBCRVoltage(),
+            'bcr_current_a': self.getBCRCurrent(),
+            '3v3_current_a': self.get3V3Current(),
+            '5v_current_a': self.get5VCurrent(),
+            'spx_voltage_v': self.getSPXVoltage(),
+            'spx_minus_current_a': self.getSPXMinusCurrent(),
+            'spx_plus_current_a': self.getSPXPlusCurrent(),
+            'spy_voltage_v': self.getSPYVoltage(),
+            'spy_minus_current_a': self.getSPYMinusCurrent(),
+            'spy_plus_current_a': self.getSPYPlusCurrent(),
+            'spz_voltage_v': self.getSPZVoltage(),
+            'spz_plus_current_a': self.getSPZPlusCurrent()
+            # Note: If any of these getter methods can fail, error handling (try-except)
+            # should be added here for robustness, returning None or a specific error indicator
+            # for the failing fields. For now, assuming they are reliable.
+        }
 
     def startRead(self, command):
         value = self.bus.read_i2c_block_data(self.DEVICE_ADDR, command, 2)
