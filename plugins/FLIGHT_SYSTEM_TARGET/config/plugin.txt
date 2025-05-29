@@ -15,3 +15,13 @@ INTERFACE FLIGHT_DATA_INT openc3/interfaces/file_interface.py nil /cosmos_tlm_in
   #   Max Length: nil (none, or a reasonable value like 1MB if desired: 1048576 bytes)
   #   Fill Length and Sync Pattern: false (not applicable for read)
   PROTOCOL READ LengthProtocol 0 32 0 1 BIG_ENDIAN 0 nil nil false
+
+# Command Interface (UDP-based)
+# COSMOS sends commands to python-app:9090
+# COSMOS would listen on port 9091 for any return packets on this interface (if any)
+INTERFACE FLIGHT_CMD_UDP_INT openc3/interfaces/udp_interface.py python-app 9090 9091 None
+  MAP_CMD_TARGET FLIGHT_SYSTEM_TARGET
+  # For UDP, if each datagram is a full command packet, a specific delineation
+  # protocol on the COSMOS sending side is often not needed. The command definition
+  # itself ensures the packet is correctly assembled before sending.
+  # If issues arise, a simple protocol or interface options might be revisited.

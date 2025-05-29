@@ -27,6 +27,8 @@ from Drivers.eps import EPS as EPS
 # Telemetry Imports
 from flightLogic.telemetryManager import TelemetryManager
 from .telemetry_writer import serialize_telemetry # Import for writing binary telemetry
+from . import shared_state # For command handling
+from .command_listener import start_command_listener # For command handling
 from Drivers.Accelerometer.Accelerometer import Accelerometer
 from Drivers.Magnetometer.Magnetometer import Magnetometer
 from Drivers.UV.UVDriver import UVDriver
@@ -46,9 +48,10 @@ from Drivers.transceiverConfig.TransceiverConfig import TransceiverConfig
 # from TXISR import interrupt
 # NOTE: This Code has past unit testing
 
-async def collect_and_log_telemetry(telemetry_manager, collection_interval_seconds, output_file_path):
+async def collect_and_log_telemetry(telemetry_manager, output_file_path): # collection_interval_seconds removed
     """
-    Collects telemetry data, transforms it for serialization, and writes it to a binary file.
+    Collects telemetry data based on shared_state, transforms it, and writes to a binary file.
+    Uses shared_state.telemetry_interval_seconds for collection frequency.
     """
     # Attempt to get a persistent RTC instance if available, otherwise use time.time()
     rtc_driver_instance = None
@@ -59,6 +62,11 @@ async def collect_and_log_telemetry(telemetry_manager, collection_interval_secon
                 break
 
     while True:
+        if not shared_state.telemetry_enabled:
+            # print("Telemetry is disabled, sleeping...") # Optional debug print
+            await asyncio.sleep(1) # Check periodically even if disabled
+            continue
+
         flat_telemetry_payload = {}
         try:
             telemetry_data_raw = telemetry_manager.collect_telemetry()
@@ -146,7 +154,8 @@ async def collect_and_log_telemetry(telemetry_manager, collection_interval_secon
         except Exception as e:
             print(f"Error in collect_and_log_telemetry loop: {e}")
         
-        await asyncio.sleep(collection_interval_seconds)
+        # Use telemetry_interval_seconds from shared_state
+        await asyncio.sleep(shared_state.telemetry_interval_seconds)
 
 ##################################################################################################################
 # executeFlightLogic()
@@ -259,8 +268,11 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	tasks.append(asyncio.create_task(pythonInterrupt.interrupt(transmitObject, packet)))  # starting rx monitoring 
 	tasks.append(asyncio.create_task(ttncData.collectTTNCData(0)))  # Boot Mode is classified as 0
 	tasks.append(asyncio.create_task(attitudeData.collectAttitudeData()))  # collecting attitude data
-	# Use telemetry_interval from config and pass the output file path
-	tasks.append(asyncio.create_task(collect_and_log_telemetry(telemetry_mgr, telemetry_interval, TELEMETRY_OUTPUT_FILE)))
+	# Use telemetry_interval from config (initial value for shared_state) and pass the output file path
+	# The collect_and_log_telemetry function will now use shared_state.telemetry_interval_seconds internally for its loop
+	shared_state.telemetry_interval_seconds = telemetry_interval # Initialize shared_state with value from config
+	tasks.append(asyncio.create_task(collect_and_log_telemetry(telemetry_mgr, TELEMETRY_OUTPUT_FILE))) # Interval removed from call
+	tasks.append(asyncio.create_task(start_command_listener())) # Add command listener task
 
 	# Initialize all mission mode objects
 	# NOTE: the comms-tx is the only exception to this rule as it is to be handled differently than other mission modes
@@ -383,6 +395,11 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 	# pre boom deploy
 		print("Entered the loop that chooses the next mission mode.")
 		recordData(bootCount, antennaDeployed, lastMode)  # Save into files
+
+		if shared_state.app_restart_requested:
+			print("Restart requested from shared_state. Breaking main mission loop.")
+			break # Exit the main mission selection loop
+
 		if ((antennaDeployed == True) and (lastMode != 3) and (lastMode != 4)):
 			print('Running pre-Boom deploy')
 			lastMode = 2
@@ -400,6 +417,39 @@ async def executeFlightLogic():  # Open the file save object, start TXISR, camer
 			print('Running post-Boom Deploy')
 			recordData(bootCount, antennaDeployed, lastMode)  # Save into files
 			await asyncio.gather(postBoomDeploy.run())
+		
+		await asyncio.sleep(0.1) # Short sleep to allow other tasks to run and check flags
+
+
+	# After loop finishes (e.g., due to restart request)
+	print("Exited main mission selection loop.")
+	if shared_state.app_restart_requested:
+		print("Performing cleanup for application restart...")
+		# Cancel all other running tasks
+		# Note: asyncio.current_task() might not be what we want if this itself is a task.
+		# We want to cancel tasks in the `tasks` list.
+		current_task = asyncio.current_task() # Get current task if executeFlightLogic is run as one
+		for task in tasks:
+			if task is not current_task and not task.done():
+				print(f"Cancelling task: {task.get_name() if hasattr(task, 'get_name') else task}")
+				task.cancel()
+		
+		# Await cancellation of tasks (optional, with a timeout)
+		# This part can be complex to get right for all scenarios.
+		# For a simple Docker restart, a quick exit might be sufficient after signalling cancellation.
+		try:
+			# Filter out the current task if it's in the list, and already done tasks
+			tasks_to_await = [task for task in tasks if task is not current_task and not task.done()]
+			if tasks_to_await:
+				print(f"Awaiting cancellation of {len(tasks_to_await)} tasks...")
+				await asyncio.wait(tasks_to_await, timeout=5.0) # Wait up to 5 seconds
+		except asyncio.TimeoutError:
+			print("Timeout waiting for tasks to cancel.")
+		except Exception as e:
+			print(f"Exception during task cancellation gathering: {e}")
+
+		print("Exiting application for Docker to restart.")
+		sys.exit(0) # Exit gracefully
 
 
 def recordData(bootCount, antennaDeployed, lastMode):

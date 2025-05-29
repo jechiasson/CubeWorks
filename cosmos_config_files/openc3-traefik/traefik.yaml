@@ -1,0 +1,20 @@
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+log:
+  level: INFO # Or ERROR for less verbosity
+
+entryPoints:
+  web:
+    address: ":2900" # For COSMOS UI
+  websecure:
+    address: ":2943" # For COSMOS UI SSL (if configured)
+
+providers:
+  docker:
+    exposedByDefault: false
+# API / Dashboard (optional, can be disabled for security)
+# api:
+#   dashboard: true
+#   insecure: true # For local dev only

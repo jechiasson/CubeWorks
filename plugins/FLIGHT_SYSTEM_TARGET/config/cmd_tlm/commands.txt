@@ -1,0 +1,34 @@
+# Command definitions for FLIGHT_SYSTEM_TARGET
+# These commands are intended to be sent over a UDP interface.
+# The Python application's UDP server will expect packets corresponding to these.
+
+# Command to Enable Telemetry
+# Sends CMD_ID_ENABLE_TELEMETRY (0x0001)
+COMMAND FLIGHT_SYSTEM_TARGET ENABLE_TELEMETRY_CMD BIG_ENDIAN "Enables telemetry output from the Python application."
+  # Parameter to hold the packed command ID.
+  # The value should be the 2-byte representation of 0x0001 (big-endian).
+  APPEND_PARAMETER PACKED_BYTES 0 BLOCK "0001" "Raw bytes for CMD_ID_ENABLE_TELEMETRY (0x0001)"
+    FORMAT_STRING "HEX" # Display hint for COSMOS UI
+
+# Command to Disable Telemetry
+# Sends CMD_ID_DISABLE_TELEMETRY (0x0002)
+COMMAND FLIGHT_SYSTEM_TARGET DISABLE_TELEMETRY_CMD BIG_ENDIAN "Disables telemetry output from the Python application."
+  APPEND_PARAMETER PACKED_BYTES 0 BLOCK "0002" "Raw bytes for CMD_ID_DISABLE_TELEMETRY (0x0002)"
+    FORMAT_STRING "HEX"
+
+# Command to Restart the Python Application
+# Sends CMD_ID_RESTART_APP (0x0003)
+COMMAND FLIGHT_SYSTEM_TARGET RESTART_APP_CMD BIG_ENDIAN "Commands the Python application to restart (exit to be restarted by Docker)."
+  APPEND_PARAMETER PACKED_BYTES 0 BLOCK "0003" "Raw bytes for CMD_ID_RESTART_APP (0x0003)"
+    FORMAT_STRING "HEX"
+
+# Command to Set Telemetry Interval
+# Sends CMD_ID_SET_TELEMETRY_INTERVAL (0x0004) followed by a 4-byte float for frequency in Hz.
+# This command is structured for COSMOS to assemble the packet from defined items.
+COMMAND FLIGHT_SYSTEM_TARGET SET_TELEMETRY_INTERVAL_CMD BIG_ENDIAN "Sets the telemetry transmission interval."
+  # Defines the items that make up the command packet.
+  # COSMOS will assemble these into a binary string before sending.
+  APPEND_ITEM CMD_ID 0 16 UINT 4 "Command ID" # Value 4 (0x0004)
+    STATE 4 4 # Ensures this item is always 4 (CMD_ID_SET_TELEMETRY_INTERVAL)
+  APPEND_ITEM FREQUENCY_HZ 16 32 FLOAT 0.1 "Frequency in Hz (e.g., 0.1 for 10s interval)"
+    UNITS Hz Hz

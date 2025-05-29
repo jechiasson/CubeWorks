@@ -197,3 +197,107 @@ Cubeworks
 [preboom deploy data flow.pdf](https://github.com/SmallSatGasTeam/CubeWorks/files/6494895/preboom.deploy.data.flow.pdf)
 
 [prepare for tx data flow.pdf](https://github.com/SmallSatGasTeam/CubeWorks/files/6494896/prepare.for.tx.data.flow.pdf)
+
+## COSMOS Telemetry Integration & Docker Setup
+
+### Overview
+
+This project now supports outputting telemetry data in a binary format that is compatible with OpenC3 COSMOS for command and control. The system is configured so that COSMOS ingests this telemetry data via a File Interface. The entire system, including the Python flight application and the COSMOS services, can be run locally using Docker Compose.
+
+### Prerequisites
+
+Before you begin, ensure you have the following installed:
+
+*   **Docker:** [Installation Guide](https://docs.docker.com/get-docker/)
+*   **Docker Compose:** [Installation Guide](https://docs.docker.com/compose/install/)
+*   **(Optional) Access to OpenC3 COSMOS Docker images:** The `docker-compose.yaml` file is configured to pull COSMOS images. By default, it uses public images from `openc3/` on Docker Hub. If you are using a private registry or specific versions, you will need to adjust the environment variables in the `.env` file.
+
+### Environment Variables
+
+A `.env` file in the root directory is used to configure aspects of the Docker Compose setup, primarily for COSMOS image sources and credentials. Review and customize this file if needed. Key variables you might want to adjust include:
+
+*   `OPENC3_REGISTRY`: The Docker registry for COSMOS images (default: `openc3`).
+*   `OPENC3_NAMESPACE`: The namespace within the registry (often blank for public Docker Hub images).
+*   `OPENC3_TAG`: The tag for COSMOS images (default: `latest`).
+*   `OPENC3_USER_ID`: User ID for running COSMOS services (default: `1001`).
+*   `OPENC3_GROUP_ID`: Group ID for running COSMOS services (default: `1001`).
+*   Various passwords like `OPENC3_REDIS_PASSWORD`, `OPENC3_BUCKET_PASSWORD`, `OPENC3_SERVICE_PASSWORD`. The defaults are provided in the `.env` file; change them for a more secure setup if exposing services.
+
+Review the `.env` file in the root of the repository and customize it for your environment, especially if you are using a private Docker registry or need to change default credentials.
+
+### Running the System
+
+To build and run the entire system:
+
+```bash
+docker-compose up --build
+```
+
+This command will:
+
+1.  Build the Python application Docker image (`python-app`) based on the `Dockerfile`.
+2.  Pull all necessary COSMOS Docker images from the configured registry (if they are not already present locally).
+3.  Start all defined services (Python application, MinIO, Redis, COSMOS API, Operator, Traefik, etc.).
+
+Once started:
+*   The Python application (`python-app` service) will begin its flight logic, which includes generating telemetry data according to the `flightLogic/telemetry_config.json` and writing it to a binary file.
+*   The COSMOS `openc3-operator` service will monitor this binary file for new telemetry packets.
+
+### Telemetry Data Flow
+
+The telemetry data flows from the Python application to COSMOS as follows:
+
+1.  The Python application (running in the `python-app` Docker service) writes serialized binary telemetry data to `flight_data.bin` located in its `/telemetry_output` directory.
+2.  This `/telemetry_output` directory within the `python-app` container is mapped to a Docker named volume called `telemetry_data_volume`.
+3.  The COSMOS `openc3-operator` service also mounts this `telemetry_data_volume`. It is mapped to `/cosmos_tlm_input` inside the `openc3-operator` container.
+4.  The `FileInterface` (named `FLIGHT_DATA_INT`) used by COSMOS is configured in `plugins/FLIGHT_SYSTEM_TARGET/config/plugin.txt`. This interface is set up to read telemetry files from the `/cosmos_tlm_input` directory.
+5.  The structure of the telemetry packets that COSMOS expects to read is defined in `plugins/FLIGHT_SYSTEM_TARGET/config/cmd_tlm/telemetry.txt`. This definition must match the binary format produced by `flightLogic/telemetry_writer.py`.
+6.  After processing, the `FileInterface` is configured to move the processed telemetry files to a directory, which is mapped to the `telemetry_archive_volume` (visible as `/cosmos_tlm_archive` inside the `openc3-operator` container).
+
+### Accessing COSMOS
+
+Once the Docker Compose setup is running, the COSMOS web interface should be accessible at:
+
+*   **`http://localhost:2900`**
+
+You can use COSMOS tools such as Telemetry Viewer, Packet Viewer, etc., to connect to the `FLIGHT_SYSTEM_TARGET` and view the `FLIGHT_PACKET` telemetry being received from the Python application.
+
+### Stopping the System
+
+To stop all running services and remove the containers:
+
+```bash
+docker-compose down
+```
+
+This command will stop and remove the containers. To also remove the named volumes (like `telemetry_data_volume`, `openc3_minio_data`, etc.), you can use `docker-compose down -v`.
+
+### Telecommand Capabilities
+
+#### Overview
+
+The Python application can now be controlled via UDP commands sent from COSMOS. COSMOS is configured to send these commands via the `FLIGHT_CMD_UDP_INT` interface, targeting the `python-app` container on UDP port 9090.
+
+#### Available Commands
+
+The following commands are available:
+
+*   **`ENABLE_TELEMETRY_CMD`**: Enables the transmission of telemetry packets.
+*   **`DISABLE_TELEMETRY_CMD`**: Disables the transmission of telemetry packets.
+*   **`RESTART_APP_CMD`**: Commands the Python application to shut down. If running under Docker with the `restart: unless-stopped` policy, the container will automatically restart.
+*   **`SET_TELEMETRY_INTERVAL_CMD`**:
+    *   Sets the interval for telemetry packet transmission.
+    *   Parameter: `FREQUENCY_HZ` (Float). Example: `0.5` for a 2-second interval. A frequency of `0` or less will disable telemetry.
+
+#### Sending Commands from COSMOS
+
+Commands can be sent using the COSMOS 'Command Sender' tool:
+
+1.  Select `FLIGHT_SYSTEM_TARGET` as the target.
+2.  Choose the desired command from the command list (e.g., `ENABLE_TELEMETRY_CMD`, `SET_TELEMETRY_INTERVAL_CMD`).
+3.  For `SET_TELEMETRY_INTERVAL_CMD`, fill in the `FREQUENCY_HZ` parameter before sending.
+
+#### UDP Port
+
+*   The Python application listens for commands on UDP port `9090` within the Docker network.
+*   This port is mapped to `9090` on the host in the `docker-compose.yaml`.
