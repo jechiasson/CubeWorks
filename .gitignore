@@ -137,3 +137,4 @@ flightConfigWifi.exe
 TXISR/data/*
 # Picture Files
 Pictures/*
+.vscode/
